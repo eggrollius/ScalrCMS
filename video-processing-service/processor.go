@@ -71,14 +71,14 @@ func ProcessVideoJob(ctx *AppContext, job *Job) {
 	// Ensure output directory exists before processing
 	if err := os.MkdirAll(outputBasePath, 0755); err != nil {
 		log.Printf("Failed to create output directory: %v", err)
-		UpdateJobStatus(ctx.DB, job.ID, JobStatusFailed)
+		UpdateJobStatus(ctx.DB, job.ID, JobStatusEncodingFailed)
 		return
 	}
 
 	// Download the input file (Bucket is now stored in Job)
 	if err := DownloadFile(context.Background(), ctx.S3Client, job.InputBucket, job.InputKey, inputFilePath); err != nil {
 		log.Printf("Failed to download file: %v", err)
-		UpdateJobStatus(ctx.DB, job.ID, JobStatusFailed)
+		UpdateJobStatus(ctx.DB, job.ID, JobStatusEncodingFailed)
 		IncrementJobFailedCount(ctx.DB, job.ID)
 		return
 	}
@@ -93,10 +93,10 @@ func ProcessVideoJob(ctx *AppContext, job *Job) {
 	}
 
 	if err == nil {
-		UpdateJobStatus(ctx.DB, job.ID, JobStatusFinished)
+		UpdateJobStatus(ctx.DB, job.ID, JobStatusEncodingSuccess)
 	} else {
 		log.Printf("Failed to process video for job %s: %v", job.ID, err)
-		UpdateJobStatus(ctx.DB, job.ID, JobStatusFailed)
+		UpdateJobStatus(ctx.DB, job.ID, JobStatusEncodingFailed)
 		IncrementJobFailedCount(ctx.DB, job.ID)
 	}
 
@@ -113,17 +113,18 @@ func ProcessVideoJob(ctx *AppContext, job *Job) {
 func CreateJobsInDB(db *sql.DB, reqPayload *RequestPayload) error {
 	for _, profile := range reqPayload.Profiles {
 		job := Job{
-			ID:           uuid.New().String(),
-			VideoID:      reqPayload.VideoId,
-			InputKey:     reqPayload.Input.Key,
-			InputBucket:  reqPayload.Input.Bucket,
-			OutputPath:   reqPayload.Output.BasePath,
-			OutputBucket: reqPayload.Output.Bucket,
-			Resolution:   0, // Default resolution, will be set later if valid
-			Crf:          profile.Crf,
-			CallbackURL:  reqPayload.CallbackURL,
-			Status:       JobStatusPending,
-			FailedCount:  0,
+			ID:               uuid.New().String(),
+			VideoID:          reqPayload.VideoId,
+			InputKey:         reqPayload.Input.Key,
+			InputBucket:      reqPayload.Input.Bucket,
+			OutputPath:       reqPayload.Output.BasePath,
+			OutputBucket:     reqPayload.Output.Bucket,
+			Resolution:       0, // Default resolution, will be set later if valid
+			Crf:              profile.Crf,
+			CallbackURL:      reqPayload.CallbackURL,
+			Status:           JobStatusEncodingPending,
+			FailedCount:      0,
+			CallbackFailures: 0,
 		}
 		if res, err := strconv.Atoi(profile.Resolution); err == nil {
 			job.Resolution = res

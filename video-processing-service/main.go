@@ -114,7 +114,7 @@ func ProcessVideoHandler(ctx *AppContext) http.HandlerFunc {
 }
 
 func StartWorkerPool(ctx *AppContext) {
-	for i := 0; i < ctx.Config.WorkerCount; i++ {
+	for i := 0; i < ctx.Config.EncoderWorkerCount; i++ {
 		go func(workerID int) {
 			log.Printf("Worker %d started", workerID)
 			for {
@@ -143,6 +143,73 @@ func StartWorkerPool(ctx *AppContext) {
 				}
 			}
 		}(i + 1)
+	}
+}
+
+// StartCallbackWorkerPool starts workers for callback jobs
+func StartCallbackWorkerPool(ctx *AppContext) {
+	for i := 0; i < 1; i++ { // one callback worker should be more than enough, add more if needed
+		go func(workerID int) {
+			log.Printf("Callback Worker %d started", workerID)
+			for {
+				jobs, err := GetCallbackPendingJobs(ctx.DB)
+				if err != nil {
+					log.Printf("Callback Worker %d: error fetching jobs: %v", workerID, err)
+					continue
+				}
+				claimed := false
+				for _, job := range jobs {
+					if job.CallbackFailures >= ctx.Config.MaxCallbackFailures {
+						UpdateJobStatus(ctx.DB, job.ID, JobStatusCallbackFailed)
+						continue
+					}
+					ok, err := ClaimCallbackJob(ctx.DB, job.ID)
+					if err != nil {
+						log.Printf("Callback Worker %d: error claiming job %s: %v", workerID, job.ID, err)
+						continue
+					}
+					if ok {
+						log.Printf("Callback Worker %d: claimed callback job %s", workerID, job.ID)
+						ProcessCallbackJob(ctx, &job)
+						claimed = true
+						break // Only process one job per loop per worker
+					}
+				}
+				if !claimed {
+					// No jobs claimed, sleep before next poll
+					time.Sleep(2 * time.Second)
+				}
+			}
+		}(i + 1)
+	}
+}
+
+// ClaimCallbackJob atomically claims a callback job
+func ClaimCallbackJob(db *sql.DB, jobID string) (bool, error) {
+	res, err := db.Exec(`UPDATE jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = ?`, int(JobStatusCallbackInProgress), jobID, int(JobStatusCallbackPending))
+	if err != nil {
+		return false, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
+// ProcessCallbackJob attempts the callback and updates job state
+func ProcessCallbackJob(ctx *AppContext, job *Job) {
+	// Example: POST to callback URL (add real payload as needed)
+	resp, err := http.Post(job.CallbackURL, "application/json", nil)
+	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		UpdateJobStatus(ctx.DB, job.ID, JobStatusCallbackSuccess)
+		return
+	}
+	IncrementCallbackFailures(ctx.DB, job.ID)
+	if job.CallbackFailures+1 >= ctx.Config.MaxCallbackFailures {
+		UpdateJobStatus(ctx.DB, job.ID, JobStatusCallbackFailed)
+	} else {
+		UpdateJobStatus(ctx.DB, job.ID, JobStatusCallbackPending)
 	}
 }
 
@@ -184,8 +251,7 @@ func main() {
 		DB:       db,
 		S3Client: s3Client,
 	}
-	// Start worker pool before server
 	StartWorkerPool(ctx)
-	// Start the server
+	StartCallbackWorkerPool(ctx)
 	StartServer(ctx)
 }

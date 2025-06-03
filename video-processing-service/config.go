@@ -19,20 +19,36 @@ type Config struct {
 	S3                      S3Config
 	LocalRawVideoPath       string
 	LocalProcessedVideoPath string
-	WorkerCount             int
+	EncoderWorkerCount      int
+	MaxEncodingFailures     int
+	MaxCallbackFailures     int
 }
 
 func LoadConfig() Config {
-	workerCount := 2 // default
+	encoderWorkerCount := 2 // default
 	if v := os.Getenv("WORKER_COUNT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			workerCount = n
+			encoderWorkerCount = n
 		}
 	}
 
 	dbFilePath := os.Getenv("DB_PATH")
 	if dbFilePath == "" {
 		log.Fatal("DB_PATH environment variable must be set")
+	}
+
+	maxCallbackFailures := 3 // default
+	if v := os.Getenv("MAX_CALLBACK_FAILURES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxCallbackFailures = n
+		}
+	}
+
+	maxEncodingFailures := 3 // default
+	if v := os.Getenv("MAX_ENCODING_FAILURES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxEncodingFailures = n
+		}
 	}
 
 	return Config{
@@ -45,6 +61,8 @@ func LoadConfig() Config {
 		},
 		LocalRawVideoPath:       filepath.Join("app", "data", "tmp", "raw-videos"),
 		LocalProcessedVideoPath: filepath.Join("app", "data", "tmp", "processed-videos"),
-		WorkerCount:             workerCount,
+		EncoderWorkerCount:      encoderWorkerCount,
+		MaxCallbackFailures:     maxCallbackFailures,
+		MaxEncodingFailures:     maxEncodingFailures,
 	}
 }
