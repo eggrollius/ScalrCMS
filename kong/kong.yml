@@ -1,0 +1,35 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: minio-service
+    url: http://minio:9000
+    routes:
+      - name: minio-route
+        paths:
+          - /
+        strip_path: false
+        preserve_host: true
+
+        plugins:
+          - name: cors
+            config:
+              origins:
+                - http://localhost:5173
+                - http://127.0.0.1:5173
+              methods:
+                - GET
+                - HEAD
+                - PUT
+                - POST
+                - DELETE
+                - OPTIONS
+              headers:
+                - Authorization
+                - Content-Type
+                - x-amz-meta-*
+              exposed_headers:
+                - ETag
+              max_age: 3600
+              preflight_continue: false
+              credentials: false
